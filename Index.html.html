@@ -1,0 +1,310 @@
+<h2 class="sr-only">Interactive tabbed visualization showing how 1, 2, and 3 independent vectors span a line, plane, and all of 3D space respectively</h2>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  .switcher { display: flex; gap: 6px; margin-bottom: 12px; }
+  .sw-btn { flex: 1; position: relative; padding: 14px 12px 12px; border-radius: var(--border-radius-lg); border: 0.5px solid var(--color-border-tertiary); background: var(--color-background-secondary); cursor: pointer; transition: all .2s; overflow: hidden; }
+  .sw-btn:hover { border-color: var(--color-border-secondary); }
+  .sw-btn.active { border-color: var(--color-border-info); border-width: 2px; }
+  .sw-num { font-size: 28px; font-weight: 500; line-height: 1; }
+  .sw-label { font-size: 12px; margin-top: 4px; }
+  .sw-sub { font-size: 11px; margin-top: 2px; opacity: 0.6; }
+  .sw-btn .sw-icon { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); opacity: 0.12; font-size: 40px; }
+  .stage { position: relative; }
+  .stage canvas { width: 100%; height: 440px; border-radius: var(--border-radius-lg); cursor: grab; touch-action: none; display: block; }
+  .stage canvas:active { cursor: grabbing; }
+  .ctrls { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; align-items: center; }
+  .sg { display: flex; align-items: center; gap: 6px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 4px 10px; border: 0.5px solid var(--color-border-tertiary); }
+  .sg label { font-size: 12px; font-weight: 500; }
+  .sg input[type=range] { width: 100px; }
+  .sg .v { font-size: 12px; font-weight: 500; min-width: 32px; color: var(--color-text-primary); }
+  .meta { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; flex-wrap: wrap; gap: 8px; }
+  .coord { font-family: var(--font-mono); font-size: 12px; color: var(--color-text-secondary); }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; }
+  .li { font-size: 11px; color: var(--color-text-secondary); display: flex; align-items: center; gap: 4px; }
+  .ld { width: 7px; height: 7px; border-radius: 50%; }
+  .hint { font-size: 11px; color: var(--color-text-tertiary); margin-top: 6px; text-align: center; }
+</style>
+
+<div class="switcher">
+  <div class="sw-btn active" onclick="switchTo(0)" id="sb0">
+    <div class="sw-num" style="color:#378ADD">1</div>
+    <div class="sw-label" style="color:var(--color-text-primary)">A line</div>
+    <div class="sw-sub" style="color:var(--color-text-secondary)">All multiples cu</div>
+    <div class="sw-icon" style="color:#378ADD">&#x2215;</div>
+  </div>
+  <div class="sw-btn" onclick="switchTo(1)" id="sb1">
+    <div class="sw-num" style="color:#0F6E56">2</div>
+    <div class="sw-label" style="color:var(--color-text-primary)">A plane</div>
+    <div class="sw-sub" style="color:var(--color-text-secondary)">All cu + dv</div>
+    <div class="sw-icon" style="color:#0F6E56">&#x25B1;</div>
+  </div>
+  <div class="sw-btn" onclick="switchTo(2)" id="sb2">
+    <div class="sw-num" style="color:#534AB7">3</div>
+    <div class="sw-label" style="color:var(--color-text-primary)">All of space</div>
+    <div class="sw-sub" style="color:var(--color-text-secondary)">All cu + dv + ew</div>
+    <div class="sw-icon" style="color:#534AB7">&#x2734;</div>
+  </div>
+</div>
+
+<div class="stage">
+  <canvas id="cv" width="680" height="440"></canvas>
+</div>
+
+<div class="ctrls" id="ctrls"></div>
+<div class="meta">
+  <div class="coord" id="coordOut"></div>
+  <div class="legend" id="legendOut"></div>
+</div>
+<div class="hint">Drag to rotate the view</div>
+
+<script>
+const cv = document.getElementById('cv');
+const DPR = window.devicePixelRatio || 1;
+const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+const textCol = dark ? '#c2c0b6' : '#3d3d3a';
+const axisCol = dark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)';
+const BLUE='#378ADD',TEAL='#0F6E56',AMBER='#854F0B',PURPLE='#534AB7',RED='#E24B4A';
+const BLUE_L='#85B7EB',TEAL_L='#5DCAA5',AMBER_L='#EF9F27',PURPLE_L='#AFA9EC',RED_L='#F09595';
+
+const u=[2,0,1], v=[0,2,0.5], w=[0.5,0,2];
+let rot={x:-0.35,y:0.7}, dragging=false, lastM={x:0,y:0};
+let tab=0;
+let sliderVals={c:10,d:5,e:6};
+
+const rng=(()=>{let s=42;return()=>{s=(s*16807)%2147483647;return s/2147483647;};})();
+let cloud=[];
+for(let i=0;i<400;i++){const a=(rng()-0.5)*4,b=(rng()-0.5)*4,cc=(rng()-0.5)*4;
+  cloud.push([u[0]*a+v[0]*b+w[0]*cc,u[1]*a+v[1]*b+w[1]*cc,u[2]*a+v[2]*b+w[2]*cc]);}
+
+function resize(){const r=cv.getBoundingClientRect();cv.width=r.width*DPR;cv.height=r.height*DPR;}
+resize();
+
+function P(x,y,z){
+  const cY=Math.cos(rot.y),sY=Math.sin(rot.y),cX=Math.cos(rot.x),sX=Math.sin(rot.x);
+  let x1=x*cY+z*sY, z1=-x*sY+z*cY, y1=y*cX-z1*sX, z2=y*sX+z1*cX;
+  const r=cv.getBoundingClientRect(), sc=Math.min(r.width,r.height)*0.088;
+  return [r.width*0.5+x1*sc, r.height*0.5-y1*sc, z2];
+}
+
+function arw(ctx,ox,oy,oz,dx,dy,dz,col,lw,al){
+  const [x1,y1]=P(ox,oy,oz),[x2,y2]=P(ox+dx,oy+dy,oz+dz);
+  ctx.save();ctx.globalAlpha=al||1;ctx.strokeStyle=col;ctx.lineWidth=lw||2;ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+  const a=Math.atan2(y2-y1,x2-x1),hl=7;
+  ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(x2,y2);
+  ctx.lineTo(x2-hl*Math.cos(a-.35),y2-hl*Math.sin(a-.35));
+  ctx.lineTo(x2-hl*Math.cos(a+.35),y2-hl*Math.sin(a+.35));ctx.fill();ctx.restore();
+}
+
+function lb(ctx,t,x,y,z,col,ox,oy){
+  const [px,py]=P(x,y,z);
+  ctx.font='500 12px "Anthropic Sans",sans-serif';ctx.fillStyle=col;ctx.fillText(t,px+(ox||6),py+(oy||-6));
+}
+
+function dash(ctx,x1,y1,z1,x2,y2,z2,col,al){
+  const [a,b]=P(x1,y1,z1),[c,d]=P(x2,y2,z2);
+  ctx.save();ctx.globalAlpha=al||.4;ctx.strokeStyle=col;ctx.lineWidth=1;
+  ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(a,b);ctx.lineTo(c,d);ctx.stroke();
+  ctx.setLineDash([]);ctx.restore();
+}
+
+function drawBg(ctx,W,H){
+  const bg1 = dark ? '#1a1a1a' : '#f7f8fa';
+  const bg2 = dark ? '#141416' : '#eef0f4';
+  ctx.fillStyle = bg1;
+  ctx.fillRect(0,0,W,H);
+
+  const dotColor = dark ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.028)';
+  const sp = 20;
+  ctx.fillStyle = dotColor;
+  for(let x=0;x<W;x+=sp) for(let y=0;y<H;y+=sp){
+    ctx.beginPath(); ctx.arc(x,y,0.8,0,Math.PI*2); ctx.fill();
+  }
+
+  const [ox,oy]=P(0,0,0);
+  const grad = ctx.createRadialGradient(ox,oy,0,ox,oy,Math.min(W,H)*0.55);
+  if(tab===0){
+    grad.addColorStop(0, dark?'rgba(56,138,221,0.06)':'rgba(56,138,221,0.05)');
+    grad.addColorStop(1, 'transparent');
+  } else if(tab===1){
+    grad.addColorStop(0, dark?'rgba(15,110,86,0.06)':'rgba(15,110,86,0.05)');
+    grad.addColorStop(1, 'transparent');
+  } else {
+    grad.addColorStop(0, dark?'rgba(83,74,183,0.06)':'rgba(83,74,183,0.05)');
+    grad.addColorStop(1, 'transparent');
+  }
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,W,H);
+}
+
+function drawAxes(ctx){
+  [[5,0,0,'x'],[0,5,0,'y'],[0,0,5,'z'],[-5,0,0,''],[0,-5,0,''],[0,0,-5,'']].forEach(([ax,ay,az,l])=>{
+    const [px,py]=P(ax,ay,az),[ox,oy]=P(0,0,0);
+    ctx.strokeStyle=axisCol;ctx.lineWidth=0.7;
+    ctx.beginPath();ctx.moveTo(ox,oy);ctx.lineTo(px,py);ctx.stroke();
+    if(l){ctx.font='500 11px "Anthropic Sans",sans-serif';ctx.fillStyle=dark?'rgba(255,255,255,0.3)':'rgba(0,0,0,0.25)';ctx.fillText(l,px+(px-ox)*0.06,py+(py-oy)*0.06);}
+  });
+  const gCol = dark?'rgba(255,255,255,0.03)':'rgba(0,0,0,0.03)';
+  for(let i=-4;i<=4;i++){if(!i)continue;
+    const [a1,b1]=P(i,0,-4),[a2,b2]=P(i,0,4);
+    ctx.strokeStyle=gCol;ctx.lineWidth=.5;ctx.beginPath();ctx.moveTo(a1,b1);ctx.lineTo(a2,b2);ctx.stroke();
+    const [c1,d1]=P(-4,0,i),[c2,d2]=P(4,0,i);
+    ctx.beginPath();ctx.moveTo(c1,d1);ctx.lineTo(c2,d2);ctx.stroke();
+  }
+}
+
+function drawTab0(ctx,W,H){
+  const c=sliderVals.c/10;
+  const ext=4.5;
+  const [lx1,ly1]=P(-u[0]*ext,-u[1]*ext,-u[2]*ext),[lx2,ly2]=P(u[0]*ext,u[1]*ext,u[2]*ext);
+  ctx.save();ctx.strokeStyle=BLUE_L;ctx.globalAlpha=0.25;ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.moveTo(lx1,ly1);ctx.lineTo(lx2,ly2);ctx.stroke();ctx.restore();
+
+  const cu=[u[0]*c,u[1]*c,u[2]*c];
+  arw(ctx,0,0,0,...cu,BLUE_L,2,0.5);
+  arw(ctx,0,0,0,...u,BLUE_L,2.5,1);
+  lb(ctx,'u',...u,BLUE_L);
+  if(Math.abs(c-1)>0.05) lb(ctx,'cu',...cu,BLUE_L,6,14);
+  const [rx,ry]=P(...cu);
+  ctx.fillStyle=BLUE_L;ctx.beginPath();ctx.arc(rx,ry,4,0,Math.PI*2);ctx.fill();
+  document.getElementById('coordOut').textContent=`cu = (${cu[0].toFixed(1)}, ${cu[1].toFixed(1)}, ${cu[2].toFixed(1)})`;
+}
+
+function drawTab1(ctx,W,H){
+  const c=sliderVals.c/10, d=sliderVals.d/10;
+  const pe=3.5;
+  const corners=[[-pe,-pe],[pe,-pe],[pe,pe],[-pe,pe]].map(([a,b])=>P(u[0]*a+v[0]*b,u[1]*a+v[1]*b,u[2]*a+v[2]*b));
+  ctx.save();ctx.fillStyle=dark?'rgba(15,110,86,0.07)':'rgba(15,110,86,0.06)';
+  ctx.beginPath();ctx.moveTo(corners[0][0],corners[0][1]);corners.slice(1).forEach(p=>ctx.lineTo(p[0],p[1]));
+  ctx.closePath();ctx.fill();
+  ctx.strokeStyle=dark?'rgba(93,202,165,0.1)':'rgba(15,110,86,0.08)';ctx.lineWidth=0.5;ctx.stroke();
+  ctx.restore();
+
+  const cu=[u[0]*c,u[1]*c,u[2]*c], dv=[v[0]*d,v[1]*d,v[2]*d];
+  const sum=[cu[0]+dv[0],cu[1]+dv[1],cu[2]+dv[2]];
+
+  const pp=[[0,0,0],cu,sum,dv].map(p=>P(...p));
+  ctx.save();ctx.fillStyle=dark?'rgba(83,74,183,0.08)':'rgba(83,74,183,0.06)';
+  ctx.beginPath();ctx.moveTo(pp[0][0],pp[0][1]);pp.slice(1).forEach(p=>ctx.lineTo(p[0],p[1]));
+  ctx.closePath();ctx.fill();ctx.restore();
+
+  dash(ctx,...cu,...sum,AMBER_L,0.4);
+  dash(ctx,...dv,...sum,TEAL_L,0.4);
+
+  arw(ctx,0,0,0,...u,TEAL_L,2.5,1);
+  arw(ctx,0,0,0,...v,AMBER_L,2.5,1);
+  arw(ctx,0,0,0,...sum,RED_L,2.5,0.9);
+  const [sx,sy]=P(...sum);
+  ctx.fillStyle=RED_L;ctx.beginPath();ctx.arc(sx,sy,4,0,Math.PI*2);ctx.fill();
+  lb(ctx,'u',...u,TEAL_L); lb(ctx,'v',...v,AMBER_L); lb(ctx,'cu + dv',...sum,RED_L,8,-8);
+  document.getElementById('coordOut').textContent=`cu + dv = (${sum[0].toFixed(1)}, ${sum[1].toFixed(1)}, ${sum[2].toFixed(1)})`;
+}
+
+function drawTab2(ctx,W,H){
+  const c=sliderVals.c/10, d=sliderVals.d/10, e=sliderVals.e/10;
+  cloud.forEach(pt=>{
+    const [px,py,pz]=P(...pt);
+    const da=Math.max(0.03,Math.min(0.12,0.07+pz*0.003));
+    ctx.fillStyle=PURPLE_L;ctx.globalAlpha=da;
+    const sz=Math.max(1.2,2.5+pz*0.05);
+    ctx.beginPath();ctx.arc(px,py,sz,0,Math.PI*2);ctx.fill();
+  });
+  ctx.globalAlpha=1;
+
+  const cu=[u[0]*c,u[1]*c,u[2]*c], dv=[v[0]*d,v[1]*d,v[2]*d], ew=[w[0]*e,w[1]*e,w[2]*e];
+  const s2=[cu[0]+dv[0],cu[1]+dv[1],cu[2]+dv[2]];
+  const sum=[s2[0]+ew[0],s2[1]+ew[1],s2[2]+ew[2]];
+
+  const pts={o:[0,0,0],cu,dv,ew,s2,cu_ew:[cu[0]+ew[0],cu[1]+ew[1],cu[2]+ew[2]],dv_ew:[dv[0]+ew[0],dv[1]+ew[1],dv[2]+ew[2]],sum};
+  [['o','cu'],['o','dv'],['o','ew'],['cu','s2'],['dv','s2'],['cu','cu_ew'],['ew','cu_ew'],['dv','dv_ew'],['ew','dv_ew'],['s2','sum'],['cu_ew','sum'],['dv_ew','sum']].forEach(([a,b])=>{
+    const p1=pts[a],p2=pts[b];
+    const [x1,y1]=P(...p1),[x2,y2]=P(...p2);
+    ctx.save();ctx.strokeStyle=dark?'rgba(175,169,236,0.14)':'rgba(83,74,183,0.1)';
+    ctx.lineWidth=0.8;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();ctx.restore();
+  });
+
+  arw(ctx,0,0,0,...u,TEAL_L,2.5,1);
+  arw(ctx,0,0,0,...v,AMBER_L,2.5,1);
+  arw(ctx,0,0,0,...w,PURPLE_L,2.5,1);
+  arw(ctx,0,0,0,...sum,RED_L,3,1);
+
+  const [sx,sy]=P(...sum);
+  ctx.fillStyle=RED_L;ctx.beginPath();ctx.arc(sx,sy,5,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle=dark?'rgba(240,149,149,0.25)':'rgba(226,75,74,0.15)';
+  ctx.lineWidth=1;ctx.beginPath();ctx.arc(sx,sy,10,0,Math.PI*2);ctx.stroke();
+
+  lb(ctx,'u',...u,TEAL_L); lb(ctx,'v',...v,AMBER_L); lb(ctx,'w',...w,PURPLE_L);
+  lb(ctx,'cu+dv+ew',...sum,RED_L,8,-8);
+  document.getElementById('coordOut').textContent=`cu + dv + ew = (${sum[0].toFixed(1)}, ${sum[1].toFixed(1)}, ${sum[2].toFixed(1)})`;
+}
+
+function draw(){
+  const r=cv.getBoundingClientRect();
+  const ctx=cv.getContext('2d');
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  const W=r.width,H=r.height;
+  ctx.clearRect(0,0,W,H);
+  drawBg(ctx,W,H);
+  drawAxes(ctx);
+  const [ox,oy]=P(0,0,0);
+  ctx.font='500 12px "Anthropic Sans",sans-serif';ctx.fillStyle=textCol;ctx.fillText('O',ox-14,oy+16);
+  [drawTab0,drawTab1,drawTab2][tab](ctx,W,H);
+}
+
+function buildControls(){
+  const box=document.getElementById('ctrls');
+  const leg=document.getElementById('legendOut');
+  box.innerHTML=''; leg.innerHTML='';
+  const mk=(id,label,col,val,min,max)=>{
+    const d=document.createElement('div');d.className='sg';
+    d.innerHTML=`<label style="color:${col}">${label}</label><input type="range" min="${min}" max="${max}" value="${val}" step="1" id="${id}" oninput="onSlider('${id}','${label}')"><span class="v" id="${id}v">${(val/10).toFixed(1)}</span>`;
+    box.appendChild(d);
+  };
+  const li=(col,t)=>{leg.innerHTML+=`<div class="li"><div class="ld" style="background:${col}"></div>${t}</div>`;};
+  if(tab===0){
+    mk('sc','c',BLUE,sliderVals.c,-25,25);
+    li(BLUE_L,'u'); li(BLUE_L,'cu');
+  } else if(tab===1){
+    mk('sc','c',TEAL,sliderVals.c,-20,20);
+    mk('sd','d',AMBER,sliderVals.d,-20,20);
+    li(TEAL_L,'u'); li(AMBER_L,'v'); li(RED_L,'cu + dv');
+  } else {
+    mk('sc','c',TEAL,sliderVals.c,-15,15);
+    mk('sd','d',AMBER,sliderVals.d,-15,15);
+    mk('se','e',PURPLE,sliderVals.e,-15,15);
+    li(TEAL_L,'u'); li(AMBER_L,'v'); li(PURPLE_L,'w'); li(RED_L,'cu+dv+ew');
+  }
+}
+
+window.onSlider = function(id, label){
+  const el=document.getElementById(id);
+  const val=parseInt(el.value);
+  document.getElementById(id+'v').textContent=(val/10).toFixed(1);
+  if(label==='c') sliderVals.c=val;
+  if(label==='d') sliderVals.d=val;
+  if(label==='e') sliderVals.e=val;
+  draw();
+};
+
+window.switchTo = function(i){
+  tab=i;
+  document.querySelectorAll('.sw-btn').forEach((b,j)=>b.classList.toggle('active',j===i));
+  buildControls();
+  draw();
+};
+
+cv.addEventListener('pointerdown',e=>{dragging=true;lastM={x:e.clientX,y:e.clientY};cv.setPointerCapture(e.pointerId);});
+cv.addEventListener('pointermove',e=>{
+  if(!dragging)return;
+  rot.y+=(e.clientX-lastM.x)*0.008;
+  rot.x+=(e.clientY-lastM.y)*0.008;
+  rot.x=Math.max(-1.2,Math.min(1.2,rot.x));
+  lastM={x:e.clientX,y:e.clientY};
+  draw();
+});
+cv.addEventListener('pointerup',()=>{dragging=false;});
+
+window.addEventListener('resize',()=>{resize();draw();});
+buildControls();
+draw();
+</script>
